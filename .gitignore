@@ -1,0 +1,9 @@
+**/venv/
+**/__pycache__/
+**/*.ftz
+**/*.bin
+**/*.safetensors
+.DS_Store
+target/
+.idea/
+.vscode/
