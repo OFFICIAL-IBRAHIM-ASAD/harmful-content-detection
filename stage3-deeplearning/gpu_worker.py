@@ -1,48 +1,77 @@
-import torch
+import ollama
 import redis
 import json
-import psycopg2 
-from transformers import pipeline
+import psycopg2
+import sys
 
-# 1. Initialize GPU
-device = 0 if torch.cuda.is_available() else -1
-print(f"🚀 Device: {'GPU (RTX 4060)' if device == 0 else 'CPU'}")
+# 1. System Connections
+try:
+    r = redis.Redis(host='localhost', port=6379, decode_responses=True)
+    db_conn = psycopg2.connect(
+        dbname="moderation_db", 
+        user="admin", 
+        password="password123", 
+        host="127.0.0.1", 
+        port="5432"
+    )
+    cursor = db_conn.cursor()
+    print("🚀 [STAGE 3] Narrative Reasoning Agent Live | Engine: Llama 3.2 | GPU: RTX 4060")
+except Exception as e:
+    print(f"❌ Connection Error: {e}")
+    sys.exit(1)
 
-# 2. Load Deep Learning Model (It will use the one already downloaded)
-classifier = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment", device=device)
-
-# 3. Connections
-r = redis.Redis(host='localhost', port=6379, decode_responses=True)
-# We use '127.0.0.1' to ensure it connects properly from WSL to Docker
-db_conn = psycopg2.connect(
-    dbname="moderation_db", 
-    user="admin", 
-    password="password123", 
-    host="127.0.0.1", 
-    port="5432"
-)
-cursor = db_conn.cursor()
-
-print("🔥 Stage 3: GPU Worker Live & Database Connected!")
-
+# 2. Main Processing Loop
 while True:
+    # Wait for a message from Stage 2 (CPU Worker)
     result = r.blpop('stage3-gpu-queue')
+    
     if result:
         message = json.loads(result[1])
         item_id = message['id']
         text = message['contentText']
         
-        # Inference
-        prediction = classifier(text)[0]
-        
-        # LABEL_0 is Negative for this model
-        final_status = "REJECTED" if prediction['label'] == 'LABEL_0' else "APPROVED"
-        
-        print(f"\n🔬 ID {item_id} | Sentiment: {prediction['label']} | Action: {final_status}")
+        print(f"\n🔍 Analyzing ID {item_id}: \"{text[:50]}...\"")
 
-        # 4. CRITICAL: Update the Postgres Database
+        # 3. The "Reasoning" System Prompt
+        # This is what solves the "Factually Correct but Misleading" challenge
+        prompt = f"""
+        TASK: Conduct a 'Narrative Integrity' audit on the following post.
+        
+        POST: "{text}"
+        
+        CRITERIA FOR REJECTION:
+        - CHERRY-PICKING: Uses a true statistic out of context to incite fear.
+        - SELECTIVE PRESENTATION: Omits vital facts that would change the reader's conclusion.
+        - MALICIOUS FRAMING: The intent is to deceive or radicalize through half-truths.
+
+        RESPONSE FORMAT:
+        You must respond ONLY with a JSON object in this format:
+        {{"status": "REJECTED" or "APPROVED", "reason": "Explain the logical fallacy or framing used"}}
+        """
+
+        try:
+            # Inference via Ollama (Running on RTX 4060)
+            response = ollama.chat(model='llama3.2', messages=[{'role': 'user', 'content': prompt}])
+            raw_output = response['message']['content']
+            
+            # Extract JSON from the LLM output (handles cases where LLM adds conversational text)
+            json_start = raw_output.find('{')
+            json_end = raw_output.rfind('}') + 1
+            analysis = json.loads(raw_output[json_start:json_end])
+            
+            final_status = analysis.get("status", "APPROVED")
+            reason = analysis.get("reason", "No malicious framing detected.")
+
+        except Exception as e:
+            print(f"⚠️ Reasoning Engine Error: {e}")
+            final_status = "REJECTED"  # Default to safety if AI fails
+            reason = "Failed Narrative Audit."
+
+        # 4. Final Truth: Update the Database
         cursor.execute("UPDATE content_items SET status = %s WHERE id = %s", (final_status, item_id))
         db_conn.commit()
         
-        print(f"✅ DB UPDATED: ID {item_id} is now {final_status}")
-        print("-" * 40)
+        print(f"⚖️ RESULT: {final_status}")
+        print(f"📝 ANALYSIS: {reason}")
+        print("✅ Database updated. Awaiting next item...")
+        print("-" * 50)

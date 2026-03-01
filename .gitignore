@@ -1,9 +1,45 @@
-**/venv/
-**/__pycache__/
-**/*.ftz
-**/*.bin
-**/*.safetensors
-.DS_Store
+# --- Python ---
+venv/
+env/
+.env
+__pycache__/
+*.py[cod]
+*$py.class
+*.ftz
+*.bin
+*.safetensors
+*.model
+.pytest_cache/
+
+# --- Java (Spring Boot) ---
 target/
+!.mvn/wrapper/maven-wrapper.jar
+build/
+.gradle/
+bin/
+*.class
+*.war
+*.ear
+*.jar
+
+# --- Database & Logs ---
+*.log
+postgres-data/
+redis-data/
+
+# --- IDEs & System ---
 .idea/
 .vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- OS Specific ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
